@@ -5,78 +5,99 @@ from qiskit.aqua.algorithms import DeutschJozsa
 from qiskit.aqua.components.oracles import CustomCircuitOracle
 
 
-def create_activate():
-    weights = qkit.QuantumRegister(3)
-    inputs = qkit.QuantumRegister(3)
-    ancills = qkit.QuantumRegister(2)
-    output = qkit.QuantumRegister(1)
+class QBNN:
+    q_inputs = None
+    q_weights = None
+    q_ancillas = None
+    _q_bnn_circ = qkit.QuantumCircuit()
+    output = None
+    s = 0
 
-    qbnn = qkit.QuantumCircuit(weights, inputs, ancills, output)
+    def __init__(self):
 
-    # Input configuration
-    #qbnn.x(inputs[0])
-    qbnn.x(inputs[1])
-    qbnn.x(inputs[2])
+        self._q_inputs = qkit.QuantumRegister(3)
+        self._q_weights = qkit.QuantumRegister(3)
+        self._q_ancillas = qkit.QuantumRegister(2)
+        self.output = qkit.QuantumRegister(8)
 
-    # Applying weights
-    qbnn.h(weights)
+        self._q_bnn_circ.add_register(self._q_weights, self._q_inputs, self._q_ancillas, self.output)
 
-    qbnn.x(weights)
+    # Configures the inputs
+    def u_inputs(self, t_step):
+        if self.s is 2:
+            self.s = 0
+        else:
+            self.s += 1
 
-    qbnn.cx(weights[0], inputs[0])
-    qbnn.cx(weights[1], inputs[1])
-    qbnn.cx(weights[2], inputs[2])
+        if t_step == 4:
+            self._q_bnn_circ.x(self._q_inputs)
+            self.s = 0
+        else:
+            self._q_bnn_circ.x(self._q_inputs[self.s])
 
-    qbnn.x(weights)
+    # Apply the weights to the inputs
+    def u_weights(self):
+        self._q_bnn_circ.h(self._q_weights)
 
-    qbnn.h(weights)
+        self._q_bnn_circ.x(self._q_weights)
 
-    qbnn.barrier()
+        for i in range(3):
+            self._q_bnn_circ.cx(self._q_weights[i], self._q_inputs[i])
+
+        self._q_bnn_circ.x(self._q_weights)
+
+        self._q_bnn_circ.h(self._q_weights)
+
+        self._q_bnn_circ.barrier()
 
     # Activation function application
+    def uf_activate(self):
+        self._q_bnn_circ.ccx(self._q_inputs[0], self._q_inputs[1], self._q_ancillas[0])
+        self._q_bnn_circ.cx(self._q_ancillas[0], self._q_ancillas[1])
+        self._q_bnn_circ.x(self._q_ancillas[1])
+        self._q_bnn_circ.barrier()
 
-    qbnn.ccx(inputs[0], inputs[1], ancills[0])
-    qbnn.cx(ancills[0], ancills[1])
-    qbnn.x(ancills[1])
-    qbnn.barrier()
+        self._q_bnn_circ.ccx(self._q_inputs[1], self._q_inputs[2], self._q_ancillas[0])
+        self._q_bnn_circ.cx(self._q_ancillas[0], self._q_ancillas[1])
+        self._q_bnn_circ.x(self._q_ancillas[1])
+        self._q_bnn_circ.barrier()
 
-    qbnn.ccx(inputs[1], inputs[2], ancills[0])
-    qbnn.cx(ancills[0], ancills[1])
-    qbnn.x(ancills[1])
-    qbnn.barrier()
+        self._q_bnn_circ.ccx(self._q_inputs[0], self._q_inputs[2], self._q_ancillas[0])
+        self._q_bnn_circ.cx(self._q_ancillas[0], self._q_ancillas[1])
 
-    qbnn.ccx(inputs[0], inputs[2], ancills[0])
-    qbnn.cx(ancills[0], ancills[1])
+    def save_output(self, train_step):
+        # Output storage
 
-    # Output storage
+        self._q_bnn_circ.cx(self._q_ancillas[1], self.output[train_step])
+        self._q_bnn_circ.barrier()
 
-    qbnn.cx(ancills[1], output[0])
-    qbnn.barrier()
+    def train(self):
+        for t_step in range(8):
+            self.u_weights()
+            self.uf_activate()
+            self.save_output(t_step)
+            self.u_inputs(t_step)
 
-    return qbnn, output, inputs, ancills
+    def get_results(self):
+
+        self._q_bnn_circ.draw(filename='QBNN')
+
+        clsbits = qkit.ClassicalRegister(8)
+        self._q_bnn_circ.add_register(clsbits)
+        self._q_bnn_circ.measure(self.output, clsbits)
+
+        backend = Aer.get_backend('qasm_simulator')
+        shots = 1024
+        job_sim = qkit.execute(experiments=self._q_bnn_circ, backend=backend, shots=1024)
+
+        count = job_sim.result().get_counts(self._q_bnn_circ)
+
+        print("Q_BNN results: ")
+
+        for qb, c in zip(count.keys(), count.values()):
+            chance = (c / shots) * 100
+            print("|{}>: {:.2f}%".format(qb, chance))
 
 
-# UF activate function
-qbnn, out_qr, v_qr, a_qr = create_activate()
-
-cl = qkit.ClassicalRegister(1)
-qbnn.add_register(cl)
-qbnn.measure(out_qr, cl)
-qbnn.draw(filename='QBNN')
-backend = Aer.get_backend('qasm_simulator')
-shots = 1024
-job_sim = qkit.execute(experiments=qbnn, backend=backend, shots=1024)
-
-count = job_sim.result().get_counts(qbnn)
-
-print("Q_BNN results:  chance |0> : {:.2f}% and |1>: {:.2f}%".format(count['0']/shots, count['1']/shots))
 
 
-"""
-oracle = CustomCircuitOracle(v_qr, out_qr, a_qr, qbnn)
-backend = Aer.get_backend('qasm_simulator')
-print(oracle.construct_circuit())
-dejo = DeutschJozsa(oracle)
-result = dejo.run(backend)
-
-print("Deutsch - Jozsa: ", result["result"])"""
