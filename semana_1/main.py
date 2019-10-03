@@ -9,8 +9,8 @@ from q_bnn import QBNN
 Q_BNN = QBNN()
 
 REPLY = input('The following algorithm consumes a lot of CPU processing continue? [y/n]\n')
-Y = ''
-if REPLY is Y:
+Y = 'y'
+if REPLY.lower() is Y:
     Q_BNN.train()
     Q_BNN.get_results()
 else:
