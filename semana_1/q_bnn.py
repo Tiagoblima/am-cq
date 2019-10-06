@@ -3,7 +3,7 @@ Contains the class QBNN that implements the Quantum Neural Network.
 """
 from itertools import combinations
 import qiskit as qkit
-from qiskit import Aer
+from qiskit import Aer, QuantumRegister, ClassicalRegister, QuantumCircuit
 import numpy as np
 
 
@@ -28,27 +28,28 @@ def generate_labels(inputs, input_size):
     return labels
 
 
-class QNeuron:
+class Layer:
     """" Builds a Quantum Neuron Circuit"""
     inputs = None
     _weights = None
     _ancillas = None
     _q_neuron = None
-    output = None
+    _output = None
     entries = []
     n_inputs = 0
 
-    def __init__(self, q_inputs, q_weight, q_ancillas, n_output):
+    def __init__(self, circuit, q_weight, q_inputs, n_output):
 
         self.n_inputs = len(q_inputs)
-        self.n_weights = len(q_weight)
-
         self.inputs = q_inputs
         self._weights = q_weight
-        self._ancillas = q_ancillas
         self._output = qkit.QuantumRegister(n_output)
+        circuit.add_register(self._output)
 
-        self._q_neuron = qkit.QuantumCircuit(self._weights, self.inputs, self._ancillas, self._output)
+        self._q_neuron = circuit
+
+    def set_ancillas(self, q_ancillas):
+        self._ancillas = q_ancillas
 
     def get_circuit(self):
         """Returns the Q_neuron circuit"""
@@ -90,22 +91,29 @@ class QNeuron:
         self.inputs = regs
         self._q_neuron.add_register(regs)
 
+    def u_activate(self, output_reg):
+        qr = QuantumRegister(3)
+        cr = ClassicalRegister(2)
+
+        circuit_1 = QuantumCircuit(qr, cr)
+        self._q_neuron.add_register(qr)
+        self._q_neuron.ccx(self.inputs[0], self.inputs[1], self._output[0])
+        get_results(self._q_neuron, 1, qr[2])
+
     def uf_activate(self, output_reg):
         print('uf_activate')
         """Applying activation function"""
-
+        i = 0
         self._q_neuron.reset(self._ancillas)
-        self._q_neuron.reset(self._output)
+        inps = list(combinations(self.inputs, 1))
+        for inp in inps:
+            self._q_neuron.x(inp[0])
+            self._q_neuron.mct(self.inputs, self._output[output_reg], self._ancillas)
+            self._q_neuron.x(inp[0])
 
-        for inp, i in zip(list(combinations(self.inputs, self.n_inputs - 1)), range(self.n_inputs)):
-            self._q_neuron.mct(inp, self._ancillas[0], self._ancillas[1])
-            self._q_neuron.cx(self._ancillas[0], self._ancillas[1])
-            self._q_neuron.reset(self._ancillas[0])
-            if i < 2:
-                self._q_neuron.x(self._ancillas[1])
+        self._q_neuron.mct(self.inputs, self._output[output_reg], self._ancillas)
 
-        self._q_neuron.cx(self._ancillas[1], self._output[output_reg])
-        self._q_neuron.barrier()
+    # self._q_neuron.cx(self._ancillas[1], self._output[output_reg])
 
     def get_output(self):
         """" Saves the output of the Q_neuron in the Quantum register output and returns it"""
@@ -123,16 +131,19 @@ class QBNN:
     entries = []
     n_inputs = 0
     labels = []
+    inputs = None
 
-    def __init__(self, entries):
+    def __init__(self, entries, input_size):
 
         self.entries = entries
         self.n_inputs = len(entries)
-        self._q_bnn_circ = qkit.QuantumCircuit()
-        self.output = qkit.QuantumRegister(self.n_inputs)
-        self.clb = qkit.ClassicalRegister(self.n_inputs)
+
         self._ancillas = qkit.QuantumRegister(2)
-        self._q_bnn_circ.add_register(self._ancillas, self.output, self.clb)
+        self.output = qkit.QuantumRegister(self.n_inputs)
+      #  self.clb = qkit.ClassicalRegister(self.n_inputs)
+        self.inputs = qkit.QuantumRegister(input_size)
+        self.weights = qkit.QuantumRegister(input_size)
+        self._q_bnn_circ = qkit.QuantumCircuit(self.weights, self.inputs, self._ancillas, self.output)
 
     def set_label(self, labels):
         """Configures the expected label for each input"""
@@ -172,35 +183,35 @@ class QBNN:
         inputs = generate_inputs(3)
         print(inputs)
         q_input = qkit.QuantumRegister(3)
-        weight = qkit.QuantumRegister(3)
-        ancillas = qkit.QuantumRegister(2)
-        circuit = qkit.QuantumCircuit(1)
 
-        q_neuron = QNeuron(q_input, weight, ancillas, 2)
+        layer_1 = Layer(self._q_bnn_circ, self.weights, self.inputs, 2)
+        layer_1.set_ancillas(self._ancillas)
+        t_step = 0
+        for inp in inputs:
+            layer_1.u_inputs(inp)
+            # layer_1.u_weights()
+            # First Layer
 
-        # First neuron
-        q_neuron.u_weights()
-        q_neuron.uf_activate(0)
+            # First neuron
 
-        # Second Neuron
-        q_neuron.u_inputs(inputs[0])
-        q_neuron.u_weights()
-        q_neuron.uf_activate(1)
+            layer_1.uf_activate(0)
 
-        circuit_1 = q_neuron.get_circuit()
+            # Second Neuron
 
-        circuit.extend(circuit_1)
+            layer_1.uf_activate(1)
 
-        circuit.barrier()
+            self._q_bnn_circ.barrier()
 
-        q_weight = qkit.QuantumRegister(2)
-        q_neuron_1 = QNeuron(q_neuron.get_output(), q_weight, ancillas, 1)
+            layer_2 = Layer(self._q_bnn_circ, self.weights, layer_1.get_output(), 1)
+            layer_2.set_ancillas(self._ancillas)
 
-        q_neuron_1.u_weights()
-        q_neuron_1.uf_activate(0)
-        circuit_2 = q_neuron_1.get_circuit()
-        circuit.extend(circuit_2)
-        get_results(circuit, 1, q_neuron_1.get_output())
+            # layer_2.u_weights()
+            layer_2.uf_activate(0)
+            self.save_output(layer_2.get_output(), t_step)
+            t_step += 1
+
+    def get_output(self):
+        return self.output
 
 
 def get_results(circ, n_clb, output):
@@ -209,7 +220,7 @@ def get_results(circ, n_clb, output):
     print("\nQ_BNN results (Accuracy): ")
     circ.draw(filename='QBNN')
 
-    clsbits = qkit.ClassicalRegister(n_clb)
+    clsbits = qkit.ClassicalRegister(len(output))
     circ.add_register(clsbits)
     circ.measure(output, clsbits)
 
@@ -224,6 +235,3 @@ def get_results(circ, n_clb, output):
     for qub, cou in zip(count.keys(), count.values()):
         chance = (cou / shots) * 100
         print("|{}>: {:.2f}%".format(qub, chance))
-
-
-
