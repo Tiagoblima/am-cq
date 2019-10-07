@@ -38,18 +38,22 @@ class Layer:
     entries = []
     n_inputs = 0
 
-    def __init__(self, circuit, q_weight, q_inputs, n_output):
+    def __init__(self, circuit, q_weight, q_inputs, n_outputs):
 
         self.n_inputs = len(q_inputs)
+        self.n_outputs = n_outputs
         self.inputs = q_inputs
         self._weights = q_weight
-        self._output = qkit.QuantumRegister(n_output)
+        self._output = QuantumRegister(self.n_outputs)
         circuit.add_register(self._output)
 
         self._q_neuron = circuit
 
     def set_ancillas(self, q_ancillas):
         self._ancillas = q_ancillas
+
+    def set_output_reg(self, output_reg):
+        self._output = output_reg
 
     def get_circuit(self):
         """Returns the Q_neuron circuit"""
@@ -67,16 +71,17 @@ class Layer:
             self._q_neuron.x(self._weights[int(pos)])
 
     def u_inputs(self, entry=None):
-        print('u_inputs')
+
         """Configures the inputs setting to 1 the inputs in the position 'pos' """
         if entry is None:
             entry = []
         self._q_neuron.reset(self.inputs)
+
         for pos in entry:
             self._q_neuron.x(self.inputs[int(pos)])
 
     def u_weights(self):
-        print('u_weights')
+
         """Apply the weights to the inputs"""
 
         self._q_neuron.reset(self._weights)
@@ -91,17 +96,8 @@ class Layer:
         self.inputs = regs
         self._q_neuron.add_register(regs)
 
-    def u_activate(self, output_reg):
-        qr = QuantumRegister(3)
-        cr = ClassicalRegister(2)
-
-        circuit_1 = QuantumCircuit(qr, cr)
-        self._q_neuron.add_register(qr)
-        self._q_neuron.ccx(self.inputs[0], self.inputs[1], self._output[0])
-        get_results(self._q_neuron, 1, qr[2])
-
     def uf_activate(self, output_reg):
-        print('uf_activate')
+
         """Applying activation function"""
         i = 0
         self._q_neuron.reset(self._ancillas)
@@ -112,8 +108,6 @@ class Layer:
             self._q_neuron.x(inp[0])
 
         self._q_neuron.mct(self.inputs, self._output[output_reg], self._ancillas)
-
-    # self._q_neuron.cx(self._ancillas[1], self._output[output_reg])
 
     def get_output(self):
         """" Saves the output of the Q_neuron in the Quantum register output and returns it"""
@@ -140,14 +134,15 @@ class QBNN:
 
         self._ancillas = qkit.QuantumRegister(2)
         self.output = qkit.QuantumRegister(self.n_inputs)
-      #  self.clb = qkit.ClassicalRegister(self.n_inputs)
+        #  self.clb = qkit.ClassicalRegister(self.n_inputs)
         self.inputs = qkit.QuantumRegister(input_size)
         self.weights = qkit.QuantumRegister(input_size)
-        self._q_bnn_circ = qkit.QuantumCircuit(self.weights, self.inputs, self._ancillas, self.output)
+        self.output_circ = QuantumCircuit(self.output)
+        self._q_bnn_circ = qkit.QuantumCircuit(self.weights, self.inputs, self._ancillas)
 
     def set_label(self, labels):
         """Configures the expected label for each input"""
-        print('set_label')
+
         if labels is None:
             labels = []
 
@@ -156,12 +151,12 @@ class QBNN:
 
     def get_circuit(self):
         """Returns the QBNN circuit"""
+        self._q_bnn_circ.draw(filename='QBNN')
         return self._q_bnn_circ
 
     def run_circuit(self, backend_name=None):
         """Runs the QBNN circuit in a given backend or in the simulator if none backend is given"""
         print('Running...')
-        self._q_bnn_circ.draw(filename='QBNN')
 
         if backend_name is None:
             backend_name = 'qasm_simulator'
@@ -172,24 +167,23 @@ class QBNN:
         print(job_result)
         return job_result
 
-    def save_output(self, output, train_step):
+    def save_output(self, output):
         """Saves the output in a specific qubit for each input"""
-
-        self._q_bnn_circ.cx(output, self.output[train_step])
+        self.output_circ.add_register(output)
+        self.output_circ.cx(output[0], self.output[0])
 
     def train(self):
         """Trains the QBNN circuit"""
         print('Training QBNN ', end='')
-        inputs = generate_inputs(3)
-        print(inputs)
-        q_input = qkit.QuantumRegister(3)
 
+        print('INPUT: ', self.entries)
         layer_1 = Layer(self._q_bnn_circ, self.weights, self.inputs, 2)
         layer_1.set_ancillas(self._ancillas)
+
         t_step = 0
-        for inp in inputs:
+        for inp in self.entries:
             layer_1.u_inputs(inp)
-            # layer_1.u_weights()
+            layer_1.u_weights()
             # First Layer
 
             # First neuron
@@ -204,20 +198,20 @@ class QBNN:
 
             layer_2 = Layer(self._q_bnn_circ, self.weights, layer_1.get_output(), 1)
             layer_2.set_ancillas(self._ancillas)
-
-            # layer_2.u_weights()
+            layer_2.u_weights()
             layer_2.uf_activate(0)
-            self.save_output(layer_2.get_output(), t_step)
+            self.output = layer_2.get_output()
+
             t_step += 1
 
     def get_output(self):
         return self.output
 
 
-def get_results(circ, n_clb, output):
+def get_results(results, circ, output, entry):
     """Shows the results given by the circuit"""
 
-    print("\nQ_BNN results (Accuracy): ")
+    print("\nQ_BNN results (OUTPUT): ")
     circ.draw(filename='QBNN')
 
     clsbits = qkit.ClassicalRegister(len(output))
@@ -235,3 +229,7 @@ def get_results(circ, n_clb, output):
     for qub, cou in zip(count.keys(), count.values()):
         chance = (cou / shots) * 100
         print("|{}>: {:.2f}%".format(qub, chance))
+
+        results[entry].append((qub, chance))
+
+    print()

@@ -6,14 +6,15 @@ from q_bnn import generate_inputs
 from q_bnn import get_results
 
 # Running quantum circuit
+results = {}
+for inp in generate_inputs(3):
+    results[inp] = []
+    Q_BNN = QBNN([inp], 3)
+    Q_BNN.train()
 
-Q_BNN = QBNN(generate_inputs(3), 3)
-Q_BNN.train()
+    circuit = Q_BNN.get_circuit()
+    get_results(results, circuit, Q_BNN.get_output(), inp)
 
-get_results(Q_BNN.get_circuit(), 1, Q_BNN.get_output())
-#REPLY = input('The following algorithm consumes a lot of CPU processing continue? [y/n]\n')
-Y = 'y'
+print(results)
 
-
-#Q_BNN.get_results()
 
