@@ -172,7 +172,7 @@ class QBNN:
         self.output_circ.add_register(output)
         self.output_circ.cx(output[0], self.output[0])
 
-    def train(self):
+    def train(self, auto_weights=False):
         """Trains the QBNN circuit"""
         print('Training QBNN ', end='')
 
@@ -183,7 +183,10 @@ class QBNN:
         t_step = 0
         for inp in self.entries:
             layer_1.u_inputs(inp)
-            layer_1.u_weights()
+
+            if auto_weights is True:
+                layer_1.u_weights()
+
             # First Layer
 
             # First neuron
@@ -198,7 +201,10 @@ class QBNN:
 
             layer_2 = Layer(self._q_bnn_circ, self.weights, layer_1.get_output(), 1)
             layer_2.set_ancillas(self._ancillas)
-            layer_2.u_weights()
+
+            if auto_weights is True:
+                layer_2.u_weights()
+
             layer_2.uf_activate(0)
             self.output = layer_2.get_output()
 
@@ -208,13 +214,13 @@ class QBNN:
         return self.output
 
 
-def get_results(results, circ, output, entry):
+def get_results(circ, output):
     """Shows the results given by the circuit"""
 
     print("\nQ_BNN results (OUTPUT): ")
     circ.draw(filename='QBNN')
 
-    clsbits = qkit.ClassicalRegister(len(output))
+    clsbits = ClassicalRegister(len(output))
     circ.add_register(clsbits)
     circ.measure(output, clsbits)
 
@@ -226,10 +232,11 @@ def get_results(results, circ, output, entry):
 
     count = result.get_counts(circ)
 
+    qub_chance = []
     for qub, cou in zip(count.keys(), count.values()):
         chance = (cou / shots) * 100
         print("|{}>: {:.2f}%".format(qub, chance))
 
-        results[entry].append((qub, chance))
+        qub_chance.append((qub, chance))
 
-    print()
+    return qub_chance
