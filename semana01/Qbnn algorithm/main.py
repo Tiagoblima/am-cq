@@ -15,7 +15,7 @@ def main():
     for inp in generate_inputs(3):
 
         q_bnn = QBNN([inp], 3)
-        q_bnn.train(auto_weights=True)
+        q_bnn.train(auto_weights=False)
 
         circuit = q_bnn.get_circuit()
         result = get_results(circuit, q_bnn.get_output())
